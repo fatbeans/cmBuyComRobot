@@ -1,4 +1,3 @@
-import entity.Info;
 import entity.NoticeInfo;
 import org.apache.commons.lang.StringUtils;
 import org.apache.commons.lang.math.NumberUtils;
@@ -29,7 +28,7 @@ import java.util.regex.Pattern;
  */
 public class NoticeRobot {
 
-    public static final Pattern timePattern = Pattern.compile("时间.*(\\d{4}.\\d{2}.\\d{2}.\\d{2}.\\d{2}.)");
+    public static final Pattern timePattern = Pattern.compile("截止时间.*?(\\d{4}.\\d{1,2}.\\d{1,2}.\\d{1,2}.\\d{1,2}.)");
     public static final String nbspText = Jsoup.parse("&nbsp;").text();
     private final String charset = "utf-8";
     CloseableHttpClient client = HttpClients.createDefault();
@@ -37,7 +36,7 @@ public class NoticeRobot {
     private final String viewUrl = "http://b2b.10086.cn/b2b/main/viewNoticeContent.html?noticeBean.id=";
     private final Pattern pattern = Pattern.compile("\\d+");
     private final HashMap<Integer, Integer> idCache = new HashMap<Integer, Integer>();
-    Pattern time2timePattern = Pattern.compile("时间.*?(\\d{4}.\\d{2}.\\d{2}.\\d{2}.\\d{2}.*?\\d{4}.\\d{2}.\\d{2}.\\d{2}.\\d{2}.?)");
+    Pattern buyTimePattern = Pattern.compile("售卖时间.+?(\\d{4}.\\d{1,2}.\\d{1,2}.((\\d{1,2}.\\d{1,2})|).*?\\d{4}.\\d{1,2}.\\d{1,2}.\\d{1,2}.\\d{1,2}.)");
     private Connection connection;
 
     /**
@@ -116,6 +115,7 @@ public class NoticeRobot {
         for (int i = 0; i < times; i++) {
             Date date = scanItem(i + 1, size, typeId, preparedStatement);
             connection.commit();
+            System.out.println("i = " + i);
 //            if(minDate.after(date)) {
 //                break;
 //            }
@@ -153,7 +153,7 @@ public class NoticeRobot {
                         preparedStatement.setString(9, info.getFile_send_time());
                         preparedStatement.setString(10, info.getContact());
                         preparedStatement.setString(11, info.getFile_send_address());
-                        preparedStatement.execute();
+                        preparedStatement.addBatch();
                         idCache.put(info.getId(), 1);
 
                         minDate = minDate.after(info.getDate()) ? info.getDate() : minDate;
@@ -217,15 +217,15 @@ public class NoticeRobot {
     }
 
     public static void main(String[] args) throws SQLException, IOException, ClassNotFoundException {
-//        System.getProperties().list(System.out);
 
-        NoticeInfo noticeInfo = new NoticeInfo();
-        noticeInfo.setId(235083);
-        new NoticeRobot().scanBuyContent(noticeInfo);
-        System.out.println(noticeInfo);
 //
+//        NoticeInfo noticeInfo = new NoticeInfo();
+//        noticeInfo.setId(229167);
+//        new NoticeRobot().scanBuyContent(noticeInfo);
+//        System.out.println(noticeInfo);
 
-//        new NoticeRobot().scanBuyBuyBuy();
+
+        new NoticeRobot().scanBuyBuyBuy();
     }
 
     private static void DbTest() throws SQLException, ClassNotFoundException {
@@ -261,31 +261,39 @@ public class NoticeRobot {
                 mobanDiv.getElementsByTag("table").get(0).children();
 
 
-        Matcher buy_time_m = time2timePattern.matcher(tr.get(3).text());
-        if (buy_time_m.find()) {
-            info.setFile_buy_time(buy_time_m.group(1));
+        for (Element element : tr) {
+            String s = element.text().replaceAll(nbspText, "");
+            if (s.contains("免责声明") || s.contains("附加项")||s.contains("项目概况")) {
+                continue;
+            }
+
+            Matcher buy_time_m = buyTimePattern.matcher(s);
+            if (buy_time_m.find()) {
+                info.setFile_buy_time(buy_time_m.group(1));
+            }
+
+            Matcher send_time_m = timePattern.matcher(s);
+            if (send_time_m.find()) {
+                info.setFile_send_time(send_time_m.group(1));
+            }
+
+            Matcher address_m = Pattern.compile("截止时间.*?地点(:|：)?(\\S+)；|;").matcher(s);
+            if (address_m.find()) {
+                info.setFile_send_address(address_m.group(2));
+            }
+            if (s.contains("联系方式")) {
+                String contact = s.replaceAll("七、", "").replaceAll("联系方式", "").replaceAll(nbspText, "").trim();
+                if (contact.length() > 512) {
+                    contact = contact.substring(0, 512);
+                }
+                info.setContact(contact);
+            }
+
+
         }
-
-        Matcher send_time_m = timePattern.matcher(tr.get(4).text());
-        if (send_time_m.find()) {
-            info.setFile_send_time(send_time_m.group(1));
-        }
-
-        Matcher address_m = Pattern.compile("地点(:|：)?(\\S+)；|;").matcher(tr.get(4).text());
-        if (address_m.find()) {
-            info.setFile_send_address(address_m.group(2));
-        }
-
-        String s = tr.get(7).getElementsByTag("div").text();
-
-
-        info.setContact(s.replaceAll(nbspText, "").trim());
-
-
-        Matcher company_buy_m = Pattern.compile("：(.+)\\d{4}").matcher(tr.last().text());
+        Matcher company_buy_m = Pattern.compile("招标人.*?：(.+)\\d{4}").matcher(tr.last().text());
         if (company_buy_m.find()) {
             info.setCompany_buy(company_buy_m.group(1).trim());
-        } else {
         }
 
 
