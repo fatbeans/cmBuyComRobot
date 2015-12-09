@@ -27,6 +27,7 @@ import java.util.regex.Pattern;
  * Created by xinxin on 2015/12/7.
  */
 public class Demo {
+
     public static void main(String[] args) throws IOException, URISyntaxException, SQLException {
 
 //        http://b2b.10086.cn/b2b/main/listVendorNoticeResult.html?noticeBean.noticeType=2
@@ -60,8 +61,11 @@ public class Demo {
 
 
     public static void PatternTest() {
-        Matcher m = Pattern.compile("\\d\\d.\\d\\d").matcher("12aa32");
-        System.out.println(m.find());
+        String s = "采购人/招标代理机构：中国移动通信集团辽宁有限公司铁岭分公司/ 辽宁依诚招标有限公司 2015年12月10日";
+        Matcher m = Pattern.compile("：(.+)\\d{4}").matcher(s);
+        if (m.find()) {
+            System.out.println(m.group(1).trim());
+        }
     }
 
 

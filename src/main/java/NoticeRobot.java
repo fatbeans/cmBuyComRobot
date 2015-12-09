@@ -1,7 +1,7 @@
 import entity.Info;
+import entity.NoticeInfo;
 import org.apache.commons.lang.StringUtils;
 import org.apache.commons.lang.math.NumberUtils;
-import org.apache.http.HttpResponse;
 import org.apache.http.NameValuePair;
 import org.apache.http.client.entity.UrlEncodedFormEntity;
 import org.apache.http.client.methods.CloseableHttpResponse;
@@ -29,12 +29,15 @@ import java.util.regex.Pattern;
  */
 public class NoticeRobot {
 
+    public static final Pattern timePattern = Pattern.compile("时间.*(\\d{4}.\\d{2}.\\d{2}.\\d{2}.\\d{2}.)");
+    public static final String nbspText = Jsoup.parse("&nbsp;").text();
     private final String charset = "utf-8";
     CloseableHttpClient client = HttpClients.createDefault();
     private final String[] dateformat = new String[]{"yyyy-MM-dd"};
     private final String viewUrl = "http://b2b.10086.cn/b2b/main/viewNoticeContent.html?noticeBean.id=";
     private final Pattern pattern = Pattern.compile("\\d+");
     private final HashMap<Integer, Integer> idCache = new HashMap<Integer, Integer>();
+    Pattern time2timePattern = Pattern.compile("时间.*?(\\d{4}.\\d{2}.\\d{2}.\\d{2}.\\d{2}.*?\\d{4}.\\d{2}.\\d{2}.\\d{2}.\\d{2}.?)");
     private Connection connection;
 
     /**
@@ -105,7 +108,9 @@ public class NoticeRobot {
         int times = getTotalNum(typeId) / size + 1;
         connection = getConnection();
         connection.setAutoCommit(false);
-        PreparedStatement preparedStatement = connection.prepareStatement("insert into noticeinfo (id,noticeType,company,title,date,url) values(?,?,?,?,?,?)");
+        PreparedStatement preparedStatement = connection.prepareStatement("insert into noticeinfo " +
+                "(id,noticeType,company,title,date,url, company_buy, file_buy_time, file_send_time, contact,file_send_address) " +
+                "values(?,?,?,?,?,?, ?, ?, ?, ?,?)");
 
 
         for (int i = 0; i < times; i++) {
@@ -132,28 +137,45 @@ public class NoticeRobot {
         Date minDate = new Date(new java.util.Date().getTime());
 
         for (Element element : elementsByTag) {
-            Info info = getInfo(element);
-            System.out.println(info);
-            if (!idCache.containsKey(info.getId())) {
-                preparedStatement.setInt(1, info.getId());
-                preparedStatement.setString(2, info.getNoticeType());
-                preparedStatement.setString(3, info.getCompany());
-                preparedStatement.setString(4, info.getTitle());
-                preparedStatement.setDate(5, info.getDate());
-                preparedStatement.setString(6, info.getUrl());
-                preparedStatement.addBatch();
-                idCache.put(info.getId(), 1);
-            }
-            minDate = minDate.after(info.getDate()) ? info.getDate() : minDate;
+            try {
+                NoticeInfo info = getInfo(element);
 
+                if (!idCache.containsKey(info.getId())) {
+                    try {
+                        preparedStatement.setInt(1, info.getId());
+                        preparedStatement.setString(2, info.getNoticeType());
+                        preparedStatement.setString(3, info.getCompany());
+                        preparedStatement.setString(4, info.getTitle());
+                        preparedStatement.setDate(5, info.getDate());
+                        preparedStatement.setString(6, info.getUrl());
+                        preparedStatement.setString(7, info.getCompany_buy());
+                        preparedStatement.setString(8, info.getFile_buy_time());
+                        preparedStatement.setString(9, info.getFile_send_time());
+                        preparedStatement.setString(10, info.getContact());
+                        preparedStatement.setString(11, info.getFile_send_address());
+                        preparedStatement.execute();
+                        idCache.put(info.getId(), 1);
+
+                        minDate = minDate.after(info.getDate()) ? info.getDate() : minDate;
+                    } catch (SQLException e) {
+                        System.out.println(info);
+                        e.printStackTrace();
+
+                    }
+
+                }
+            } catch (Exception e1) {
+//                e.printStackTrace();
+                System.out.println("失败公告：" + element.attr("onclick"));
+            }
         }
         response.close();
         preparedStatement.executeBatch();
         return minDate;
     }
 
-    private Info getInfo(Element element) {
-        Info info = new Info();
+    private NoticeInfo getInfo(Element element) throws IOException {
+        NoticeInfo info = new NoticeInfo();
         String attr = element.attr("onclick");
         Matcher m = pattern.matcher(attr);
         m.find();
@@ -163,6 +185,7 @@ public class NoticeRobot {
         info.setTitle(element.child(2).child(0).text());
         info.setDate(new Date(DateUtils.parseDate(element.child(3).text().trim(), dateformat).getTime()));
         info.setUrl(viewUrl + info.getId());
+        scanBuyContent(info);
         return info;
     }
 
@@ -196,8 +219,13 @@ public class NoticeRobot {
     public static void main(String[] args) throws SQLException, IOException, ClassNotFoundException {
 //        System.getProperties().list(System.out);
 
+        NoticeInfo noticeInfo = new NoticeInfo();
+        noticeInfo.setId(235083);
+        new NoticeRobot().scanBuyContent(noticeInfo);
+        System.out.println(noticeInfo);
+//
 
-        new NoticeRobot().scanBuyContent();
+//        new NoticeRobot().scanBuyBuyBuy();
     }
 
     private static void DbTest() throws SQLException, ClassNotFoundException {
@@ -219,13 +247,46 @@ public class NoticeRobot {
     }
 
 
-    public  void scanBuyContent() throws IOException {
-        HttpPost post = new HttpPost("http://b2b.10086.cn/b2b/main/viewNoticeContent.html?noticeBean.id=234693");
+    public void scanBuyContent(NoticeInfo info) throws IOException {
+
+        HttpPost post = new HttpPost("http://b2b.10086.cn/b2b/main/viewNoticeContent.html?noticeBean.id=" + info.getId());
         CloseableHttpResponse response = client.execute(post);
         String content = EntityUtils.toString(response.getEntity(), charset);
         Document document = Jsoup.parse(content);
-        Element table = document.getElementById("mobanDiv").child(1);
-        System.out.println(table);
+
+        Element mobanDiv = document.getElementById("mobanDiv");
+
+        Elements tr = mobanDiv.getElementsByTag("table").get(0).child(0).tagName().equals("tbody") ?
+                mobanDiv.getElementsByTag("table").get(0).child(0).children() :
+                mobanDiv.getElementsByTag("table").get(0).children();
+
+
+        Matcher buy_time_m = time2timePattern.matcher(tr.get(3).text());
+        if (buy_time_m.find()) {
+            info.setFile_buy_time(buy_time_m.group(1));
+        }
+
+        Matcher send_time_m = timePattern.matcher(tr.get(4).text());
+        if (send_time_m.find()) {
+            info.setFile_send_time(send_time_m.group(1));
+        }
+
+        Matcher address_m = Pattern.compile("地点(:|：)?(\\S+)；|;").matcher(tr.get(4).text());
+        if (address_m.find()) {
+            info.setFile_send_address(address_m.group(2));
+        }
+
+        String s = tr.get(7).getElementsByTag("div").text();
+
+
+        info.setContact(s.replaceAll(nbspText, "").trim());
+
+
+        Matcher company_buy_m = Pattern.compile("：(.+)\\d{4}").matcher(tr.last().text());
+        if (company_buy_m.find()) {
+            info.setCompany_buy(company_buy_m.group(1).trim());
+        } else {
+        }
 
 
     }
